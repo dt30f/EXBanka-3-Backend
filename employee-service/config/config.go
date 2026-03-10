@@ -16,6 +16,7 @@ type Config struct {
 	DBName         string
 	DBSSLMode      string
 	AuthServiceURL string
+	JWTSecret 	   string
 }
 
 func LoadConfig() *Config {
@@ -33,6 +34,7 @@ func LoadConfig() *Config {
 		DBName:         getEnv("DB_NAME", "bankdb"),
 		DBSSLMode:      getEnv("DB_SSLMODE", "disable"),
 		AuthServiceURL: getEnv("AUTH_SERVICE_URL", "http://localhost:8081"),
+		JWTSecret:		getEnv("JWT_SECRET", "super_secret_key_change_this"),
 	}
 
 	return cfg
