@@ -67,7 +67,7 @@ func (s *stubAccountRepo) UpdateFields(id uint, fields map[string]interface{}) e
 func TestGetPayment_ReturnsPayment(t *testing.T) {
 	repo := newMockListPaymentRepo()
 	repo.payments[5] = &models.Payment{ID: 5, Iznos: 250, Status: "uspesno"}
-	svc := service.NewPaymentServiceWithRepos(&stubAccountRepo{}, repo, nil)
+	svc := service.NewPaymentServiceWithRepos(&stubAccountRepo{}, repo, nil, nil)
 
 	p, err := svc.GetPayment(5)
 
@@ -84,7 +84,7 @@ func TestGetPayment_ReturnsPayment(t *testing.T) {
 
 func TestGetPayment_NotFound_ReturnsError(t *testing.T) {
 	repo := newMockListPaymentRepo()
-	svc := service.NewPaymentServiceWithRepos(&stubAccountRepo{}, repo, nil)
+	svc := service.NewPaymentServiceWithRepos(&stubAccountRepo{}, repo, nil, nil)
 
 	_, err := svc.GetPayment(99)
 
@@ -98,7 +98,7 @@ func TestListPaymentsByAccount_ReturnsPayments(t *testing.T) {
 	repo := newMockListPaymentRepo()
 	repo.byAccountResult = payments
 	repo.byAccountTotal = 2
-	svc := service.NewPaymentServiceWithRepos(&stubAccountRepo{}, repo, nil)
+	svc := service.NewPaymentServiceWithRepos(&stubAccountRepo{}, repo, nil, nil)
 
 	result, total, err := svc.ListPaymentsByAccount(10, models.PaymentFilter{Page: 1, PageSize: 20})
 
@@ -117,7 +117,7 @@ func TestListPaymentsByAccount_FilterByStatus(t *testing.T) {
 	repo := newMockListPaymentRepo()
 	repo.byAccountResult = []models.Payment{{ID: 1, Status: "uspesno"}}
 	repo.byAccountTotal = 1
-	svc := service.NewPaymentServiceWithRepos(&stubAccountRepo{}, repo, nil)
+	svc := service.NewPaymentServiceWithRepos(&stubAccountRepo{}, repo, nil, nil)
 
 	svc.ListPaymentsByAccount(10, models.PaymentFilter{Status: "uspesno", Page: 1, PageSize: 10})
 
@@ -131,7 +131,7 @@ func TestListPaymentsByClient_ReturnsPayments(t *testing.T) {
 	repo := newMockListPaymentRepo()
 	repo.byClientResult = payments
 	repo.byClientTotal = 3
-	svc := service.NewPaymentServiceWithRepos(&stubAccountRepo{}, repo, nil)
+	svc := service.NewPaymentServiceWithRepos(&stubAccountRepo{}, repo, nil, nil)
 
 	result, total, err := svc.ListPaymentsByClient(7, models.PaymentFilter{})
 
@@ -148,7 +148,7 @@ func TestListPaymentsByClient_ReturnsPayments(t *testing.T) {
 
 func TestListPaymentsByClient_PaginationPassedThrough(t *testing.T) {
 	repo := newMockListPaymentRepo()
-	svc := service.NewPaymentServiceWithRepos(&stubAccountRepo{}, repo, nil)
+	svc := service.NewPaymentServiceWithRepos(&stubAccountRepo{}, repo, nil, nil)
 
 	svc.ListPaymentsByClient(7, models.PaymentFilter{Page: 2, PageSize: 5})
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/RAF-SI-2025/EXBanka-3-Backend/account-service/internal/models"
 	"github.com/RAF-SI-2025/EXBanka-3-Backend/account-service/internal/util"
@@ -72,6 +73,7 @@ func (s *AccountService) CreateAccount(input CreateAccountInput) (*models.Accoun
 		}
 	}
 
+	expires := time.Now().AddDate(5, 0, 0)
 	account := &models.Account{
 		BrojRacuna:        util.GenerateAccountNumber(input.Tip, input.Vrsta),
 		ClientID:          input.ClientID,
@@ -85,6 +87,7 @@ func (s *AccountService) CreateAccount(input CreateAccountInput) (*models.Accoun
 		RaspolozivoStanje: input.PocetnoStanje,
 		DnevniLimit:       100000,
 		MesecniLimit:      1000000,
+		DatumIsteka:       &expires,
 		Status:            "aktivan",
 	}
 

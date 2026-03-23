@@ -100,7 +100,7 @@ func (m *mockNewRecipientRepo) Create(r *models.PaymentRecipient) error {
 func rsdAccount(id uint, balance float64, clientID *uint) *models.Account {
 	return &models.Account{
 		ID: id, RaspolozivoStanje: balance, Stanje: balance,
-		DnevniLimit: 100000, ClientID: clientID,
+		DnevniLimit: 100000, MesecniLimit: 1000000, ClientID: clientID,
 	}
 }
 
@@ -111,7 +111,7 @@ func TestCreatePayment_Success_StatusUObradi(t *testing.T) {
 		1: rsdAccount(1, 5000, nil),
 	}}
 	paymentRepo := newMockPaymentRepo()
-	svc := service.NewPaymentServiceWithRepos(accountRepo, paymentRepo, nil)
+	svc := service.NewPaymentServiceWithRepos(accountRepo, paymentRepo, nil, nil)
 
 	p, err := svc.CreatePayment(service.CreatePaymentInput{
 		RacunPosiljaocaID: 1,
@@ -133,7 +133,7 @@ func TestCreatePayment_GeneratesSixDigitCode(t *testing.T) {
 		1: rsdAccount(1, 5000, nil),
 	}}
 	paymentRepo := newMockPaymentRepo()
-	svc := service.NewPaymentServiceWithRepos(accountRepo, paymentRepo, nil)
+	svc := service.NewPaymentServiceWithRepos(accountRepo, paymentRepo, nil, nil)
 
 	p, err := svc.CreatePayment(service.CreatePaymentInput{
 		RacunPosiljaocaID: 1,
@@ -159,7 +159,7 @@ func TestCreatePayment_InsufficientBalance_ReturnsError(t *testing.T) {
 	accountRepo := &mockAccountRepo{accounts: map[uint]*models.Account{
 		1: rsdAccount(1, 100, nil),
 	}}
-	svc := service.NewPaymentServiceWithRepos(accountRepo, newMockPaymentRepo(), nil)
+	svc := service.NewPaymentServiceWithRepos(accountRepo, newMockPaymentRepo(), nil, nil)
 
 	_, err := svc.CreatePayment(service.CreatePaymentInput{
 		RacunPosiljaocaID: 1,
@@ -177,7 +177,7 @@ func TestVerifyPayment_CorrectCode_SetsStatusUspesno(t *testing.T) {
 		1: rsdAccount(1, 5000, nil),
 	}}
 	paymentRepo := newMockPaymentRepo()
-	svc := service.NewPaymentServiceWithRepos(accountRepo, paymentRepo, nil)
+	svc := service.NewPaymentServiceWithRepos(accountRepo, paymentRepo, nil, nil)
 
 	created, _ := svc.CreatePayment(service.CreatePaymentInput{
 		RacunPosiljaocaID: 1,
@@ -200,7 +200,7 @@ func TestVerifyPayment_WrongCode_ReturnsError(t *testing.T) {
 		1: rsdAccount(1, 5000, nil),
 	}}
 	paymentRepo := newMockPaymentRepo()
-	svc := service.NewPaymentServiceWithRepos(accountRepo, paymentRepo, nil)
+	svc := service.NewPaymentServiceWithRepos(accountRepo, paymentRepo, nil, nil)
 
 	created, _ := svc.CreatePayment(service.CreatePaymentInput{
 		RacunPosiljaocaID: 1,
@@ -220,7 +220,7 @@ func TestVerifyPayment_DeductsSenderBalance(t *testing.T) {
 		1: rsdAccount(1, 5000, nil),
 	}}
 	paymentRepo := newMockPaymentRepo()
-	svc := service.NewPaymentServiceWithRepos(accountRepo, paymentRepo, nil)
+	svc := service.NewPaymentServiceWithRepos(accountRepo, paymentRepo, nil, nil)
 
 	created, _ := svc.CreatePayment(service.CreatePaymentInput{
 		RacunPosiljaocaID: 1,
@@ -241,6 +241,106 @@ func TestVerifyPayment_DeductsSenderBalance(t *testing.T) {
 	}
 }
 
+// --- DnevnaPotrosnja / MesecnaPotrosnja tests ---
+
+func TestCreatePayment_DailySpendingExceedsLimit_ReturnsError(t *testing.T) {
+	accountRepo := &mockAccountRepo{accounts: map[uint]*models.Account{
+		1: {
+			ID: 1, RaspolozivoStanje: 50000, Stanje: 50000,
+			DnevniLimit: 100000, MesecniLimit: 1000000,
+			DnevnaPotrosnja: 90000, // already spent 90k today
+			ClientID: nil,
+		},
+	}}
+	svc := service.NewPaymentServiceWithRepos(accountRepo, newMockPaymentRepo(), nil, nil)
+
+	_, err := svc.CreatePayment(service.CreatePaymentInput{
+		RacunPosiljaocaID: 1,
+		RacunPrimaocaBroj: "000000000000000098",
+		Iznos:             20000, // 90000+20000=110000 > 100000
+	})
+	if err == nil {
+		t.Fatal("expected daily spending limit error, got nil")
+	}
+}
+
+func TestCreatePayment_MonthlySpendingExceedsLimit_ReturnsError(t *testing.T) {
+	accountRepo := &mockAccountRepo{accounts: map[uint]*models.Account{
+		1: {
+			ID: 1, RaspolozivoStanje: 100000, Stanje: 100000,
+			DnevniLimit: 500000, MesecniLimit: 1000000,
+			MesecnaPotrosnja: 970000, // already spent 970k this month
+			ClientID: nil,
+		},
+	}}
+	svc := service.NewPaymentServiceWithRepos(accountRepo, newMockPaymentRepo(), nil, nil)
+
+	_, err := svc.CreatePayment(service.CreatePaymentInput{
+		RacunPosiljaocaID: 1,
+		RacunPrimaocaBroj: "000000000000000098",
+		Iznos:             50000, // 970000+50000=1020000 > 1000000
+	})
+	if err == nil {
+		t.Fatal("expected monthly spending limit error, got nil")
+	}
+}
+
+func TestVerifyPayment_Success_UpdatesDnevnaPotrosnja(t *testing.T) {
+	accountRepo := &mockAccountRepo{accounts: map[uint]*models.Account{
+		1: {
+			ID: 1, RaspolozivoStanje: 5000, Stanje: 5000,
+			DnevniLimit: 100000, MesecniLimit: 1000000,
+			DnevnaPotrosnja: 1000, MesecnaPotrosnja: 5000,
+			ClientID: nil,
+		},
+	}}
+	paymentRepo := newMockPaymentRepo()
+	svc := service.NewPaymentServiceWithRepos(accountRepo, paymentRepo, nil, nil)
+
+	created, _ := svc.CreatePayment(service.CreatePaymentInput{
+		RacunPosiljaocaID: 1,
+		RacunPrimaocaBroj: "000000000000000098",
+		Iznos:             300,
+	})
+	svc.VerifyPayment(created.ID, created.VerifikacioniKod)
+
+	newDnevna, ok := accountRepo.updatedFields["dnevna_potrosnja"].(float64)
+	if !ok {
+		t.Fatal("dnevna_potrosnja not updated after successful payment verification")
+	}
+	if newDnevna != 1300 {
+		t.Errorf("expected dnevna_potrosnja=1300, got %f", newDnevna)
+	}
+}
+
+func TestVerifyPayment_Success_UpdatesMesecnaPotrosnja(t *testing.T) {
+	accountRepo := &mockAccountRepo{accounts: map[uint]*models.Account{
+		1: {
+			ID: 1, RaspolozivoStanje: 5000, Stanje: 5000,
+			DnevniLimit: 100000, MesecniLimit: 1000000,
+			DnevnaPotrosnja: 1000, MesecnaPotrosnja: 5000,
+			ClientID: nil,
+		},
+	}}
+	paymentRepo := newMockPaymentRepo()
+	svc := service.NewPaymentServiceWithRepos(accountRepo, paymentRepo, nil, nil)
+
+	created, _ := svc.CreatePayment(service.CreatePaymentInput{
+		RacunPosiljaocaID: 1,
+		RacunPrimaocaBroj: "000000000000000098",
+		Iznos:             300,
+	})
+	svc.VerifyPayment(created.ID, created.VerifikacioniKod)
+
+	newMesecna, ok := accountRepo.updatedFields["mesecna_potrosnja"].(float64)
+	if !ok {
+		t.Fatal("mesecna_potrosnja not updated after successful payment verification")
+	}
+	if newMesecna != 5300 {
+		t.Errorf("expected mesecna_potrosnja=5300, got %f", newMesecna)
+	}
+}
+
 func TestCreatePayment_WithAddRecipient_CreatesRecipient(t *testing.T) {
 	clientID := uint(7)
 	accountRepo := &mockAccountRepo{accounts: map[uint]*models.Account{
@@ -248,7 +348,7 @@ func TestCreatePayment_WithAddRecipient_CreatesRecipient(t *testing.T) {
 	}}
 	paymentRepo := newMockPaymentRepo()
 	recipientRepo := &mockNewRecipientRepo{}
-	svc := service.NewPaymentServiceWithRepos(accountRepo, paymentRepo, recipientRepo)
+	svc := service.NewPaymentServiceWithRepos(accountRepo, paymentRepo, recipientRepo, nil)
 
 	_, err := svc.CreatePayment(service.CreatePaymentInput{
 		RacunPosiljaocaID: 1,

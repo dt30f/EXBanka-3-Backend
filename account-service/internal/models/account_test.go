@@ -57,3 +57,45 @@ func TestAccount_VrstaValues(t *testing.T) {
 		t.Errorf("expected poslovni, got %s", poslovni.Vrsta)
 	}
 }
+
+func TestAccount_HasDnevnaPotrosnja(t *testing.T) {
+	rt := reflect.TypeOf(models.Account{})
+	f, ok := rt.FieldByName("DnevnaPotrosnja")
+	if !ok {
+		t.Fatal("DnevnaPotrosnja field not found on Account")
+	}
+	tag := f.Tag.Get("gorm")
+	if !strings.Contains(tag, "default:0") {
+		t.Errorf("DnevnaPotrosnja: expected gorm tag to contain default:0, got: %s", tag)
+	}
+	if f.Type.Kind() != reflect.Float64 {
+		t.Errorf("DnevnaPotrosnja: expected float64, got %s", f.Type.Kind())
+	}
+}
+
+func TestAccount_HasMesecnaPotrosnja(t *testing.T) {
+	rt := reflect.TypeOf(models.Account{})
+	f, ok := rt.FieldByName("MesecnaPotrosnja")
+	if !ok {
+		t.Fatal("MesecnaPotrosnja field not found on Account")
+	}
+	tag := f.Tag.Get("gorm")
+	if !strings.Contains(tag, "default:0") {
+		t.Errorf("MesecnaPotrosnja: expected gorm tag to contain default:0, got: %s", tag)
+	}
+	if f.Type.Kind() != reflect.Float64 {
+		t.Errorf("MesecnaPotrosnja: expected float64, got %s", f.Type.Kind())
+	}
+}
+
+func TestAccount_HasDatumIsteka(t *testing.T) {
+	rt := reflect.TypeOf(models.Account{})
+	f, ok := rt.FieldByName("DatumIsteka")
+	if !ok {
+		t.Fatal("DatumIsteka field not found on Account")
+	}
+	// Must be a pointer to time.Time
+	if f.Type.Kind() != reflect.Ptr {
+		t.Errorf("DatumIsteka: expected pointer type, got %s", f.Type.Kind())
+	}
+}

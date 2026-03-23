@@ -86,6 +86,14 @@ func (s *TransferService) CreateTransfer(input CreateTransferInput) (*models.Tra
 		return nil, fmt.Errorf("amount %.2f exceeds daily limit %.2f",
 			input.Iznos, sender.DnevniLimit)
 	}
+	if sender.DnevnaPotrosnja+input.Iznos > sender.DnevniLimit {
+		return nil, fmt.Errorf("daily spending limit exceeded: spent %.2f, limit %.2f, requested %.2f",
+			sender.DnevnaPotrosnja, sender.DnevniLimit, input.Iznos)
+	}
+	if sender.MesecnaPotrosnja+input.Iznos > sender.MesecniLimit {
+		return nil, fmt.Errorf("monthly spending limit exceeded: spent %.2f, limit %.2f, requested %.2f",
+			sender.MesecnaPotrosnja, sender.MesecniLimit, input.Iznos)
+	}
 
 	// Determine converted amount, exchange rate, and commission.
 	kurs := 1.0
@@ -146,6 +154,8 @@ func (s *TransferService) CreateTransfer(input CreateTransferInput) (*models.Tra
 		if err := s.accountRepo.UpdateFields(sender.ID, map[string]interface{}{
 			"stanje":             sender.Stanje - ukupnoZaSkidanje,
 			"raspolozivo_stanje": sender.RaspolozivoStanje - ukupnoZaSkidanje,
+			"dnevna_potrosnja":   sender.DnevnaPotrosnja + input.Iznos,
+			"mesecna_potrosnja":  sender.MesecnaPotrosnja + input.Iznos,
 		}); err != nil {
 			return nil, fmt.Errorf("failed to update sender balance: %w", err)
 		}
@@ -154,6 +164,8 @@ func (s *TransferService) CreateTransfer(input CreateTransferInput) (*models.Tra
 		if err := s.accountRepo.UpdateFields(sender.ID, map[string]interface{}{
 			"stanje":             sender.Stanje - input.Iznos,
 			"raspolozivo_stanje": sender.RaspolozivoStanje - input.Iznos,
+			"dnevna_potrosnja":   sender.DnevnaPotrosnja + input.Iznos,
+			"mesecna_potrosnja":  sender.MesecnaPotrosnja + input.Iznos,
 		}); err != nil {
 			return nil, fmt.Errorf("failed to update sender balance: %w", err)
 		}

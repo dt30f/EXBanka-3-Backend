@@ -76,7 +76,7 @@ func (h *AccountHandler) CreateAccount(ctx context.Context, req *accountv1.Creat
 		Naziv:      req.Naziv,
 	}
 	// Look up client email for notification
-	if req.ClientId != 0 {
+	if req.ClientId != 0 && h.db != nil {
 		var client models.Client
 		if err := h.db.First(&client, req.ClientId).Error; err == nil {
 			input.ClientEmail = client.Email

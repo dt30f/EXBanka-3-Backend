@@ -76,6 +76,14 @@ func (s *PaymentService) CreatePayment(input CreatePaymentInput) (*models.Paymen
 		return nil, fmt.Errorf("insufficient balance: available %.2f, requested %.2f",
 			sender.RaspolozivoStanje, input.Iznos)
 	}
+	if sender.DnevnaPotrosnja+input.Iznos > sender.DnevniLimit {
+		return nil, fmt.Errorf("daily spending limit exceeded: spent %.2f, limit %.2f, requested %.2f",
+			sender.DnevnaPotrosnja, sender.DnevniLimit, input.Iznos)
+	}
+	if sender.MesecnaPotrosnja+input.Iznos > sender.MesecniLimit {
+		return nil, fmt.Errorf("monthly spending limit exceeded: spent %.2f, limit %.2f, requested %.2f",
+			sender.MesecnaPotrosnja, sender.MesecniLimit, input.Iznos)
+	}
 
 	code := fmt.Sprintf("%06d", rand.Intn(1_000_000))
 
@@ -143,6 +151,8 @@ func (s *PaymentService) VerifyPayment(paymentID uint, verificationCode string) 
 	if err := s.accountRepo.UpdateFields(sender.ID, map[string]interface{}{
 		"stanje":             sender.Stanje - payment.Iznos,
 		"raspolozivo_stanje": sender.RaspolozivoStanje - payment.Iznos,
+		"dnevna_potrosnja":   sender.DnevnaPotrosnja + payment.Iznos,
+		"mesecna_potrosnja":  sender.MesecnaPotrosnja + payment.Iznos,
 	}); err != nil {
 		return nil, fmt.Errorf("failed to deduct balance: %w", err)
 	}

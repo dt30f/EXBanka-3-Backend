@@ -8,5 +8,8 @@ type Account struct {
 	RaspolozivoStanje float64 `gorm:"default:0"`
 	Stanje            float64 `gorm:"default:0"`
 	DnevniLimit       float64 `gorm:"default:100000"`
+	MesecniLimit      float64 `gorm:"default:1000000"`
+	DnevnaPotrosnja   float64 `gorm:"default:0"`
+	MesecnaPotrosnja  float64 `gorm:"default:0"`
 	Status            string  `gorm:"default:'aktivan'"`
 }

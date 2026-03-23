@@ -16,6 +16,8 @@ type Account struct {
 	RaspolozivoStanje float64   `gorm:"default:0" json:"raspolozivo_stanje"`
 	DnevniLimit       float64   `gorm:"default:100000" json:"dnevni_limit"`
 	MesecniLimit      float64   `gorm:"default:1000000" json:"mesecni_limit"`
+	DnevnaPotrosnja   float64   `gorm:"default:0" json:"dnevna_potrosnja"`
+	MesecnaPotrosnja  float64   `gorm:"default:0" json:"mesecna_potrosnja"`
 	Naziv             string    `json:"naziv"`
 	Status            string    `gorm:"default:'aktivan'" json:"status"`
 	Currency          Currency  `gorm:"foreignKey:CurrencyID" json:"currency"`

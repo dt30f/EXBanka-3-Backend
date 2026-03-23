@@ -40,7 +40,7 @@ func (m *mockAccountService) ListAllAccounts(filter models.AccountFilter) ([]mod
 func (m *mockAccountService) UpdateAccountName(id uint, naziv string) error {
 	return m.updateNameErr
 }
-func (m *mockAccountService) UpdateAccountLimits(id uint, dnevniLimit, mesecniLimit float64) error {
+func (m *mockAccountService) UpdateAccountLimits(id uint, clientID uint, dnevniLimit, mesecniLimit float64) error {
 	return m.updateLimitsErr
 }
 

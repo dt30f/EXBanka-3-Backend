@@ -3,6 +3,7 @@ package service_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/RAF-SI-2025/EXBanka-3-Backend/account-service/internal/models"
 	"github.com/RAF-SI-2025/EXBanka-3-Backend/account-service/internal/service"
@@ -52,6 +53,9 @@ func (m *mockAccountRepo) UpdateFields(id uint, fields map[string]interface{}) e
 	m.updatedFields = fields
 	return nil
 }
+func (m *mockAccountRepo) ExistsByNameForClient(_ uint, _ string, _ uint) (bool, error) {
+	return false, nil
+}
 
 type mockCurrencyRepo struct {
 	currency *models.Currency
@@ -69,7 +73,7 @@ func ptr(u uint) *uint { return &u }
 // --- CreateAccount tests ---
 
 func TestCreateAccount_TekuciLicni_Success(t *testing.T) {
-	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, &mockCurrencyRepo{})
+	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, &mockCurrencyRepo{}, nil)
 
 	acc, err := svc.CreateAccount(service.CreateAccountInput{
 		ClientID:   ptr(1),
@@ -87,7 +91,7 @@ func TestCreateAccount_TekuciLicni_Success(t *testing.T) {
 
 func TestCreateAccount_DevizniLicni_NonRSD_Success(t *testing.T) {
 	currencyRepo := &mockCurrencyRepo{currency: &models.Currency{ID: 2, Kod: "EUR"}}
-	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, currencyRepo)
+	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, currencyRepo, nil)
 
 	acc, err := svc.CreateAccount(service.CreateAccountInput{
 		ClientID:   ptr(1),
@@ -105,7 +109,7 @@ func TestCreateAccount_DevizniLicni_NonRSD_Success(t *testing.T) {
 
 func TestCreateAccount_DevizniWithRSD_ReturnsError(t *testing.T) {
 	currencyRepo := &mockCurrencyRepo{currency: &models.Currency{ID: 1, Kod: "RSD"}}
-	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, currencyRepo)
+	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, currencyRepo, nil)
 
 	_, err := svc.CreateAccount(service.CreateAccountInput{
 		ClientID:   ptr(1),
@@ -119,7 +123,7 @@ func TestCreateAccount_DevizniWithRSD_ReturnsError(t *testing.T) {
 }
 
 func TestCreateAccount_PoslovniWithoutFirma_ReturnsError(t *testing.T) {
-	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, &mockCurrencyRepo{})
+	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, &mockCurrencyRepo{}, nil)
 
 	_, err := svc.CreateAccount(service.CreateAccountInput{
 		ClientID:   ptr(1),
@@ -134,7 +138,7 @@ func TestCreateAccount_PoslovniWithoutFirma_ReturnsError(t *testing.T) {
 }
 
 func TestCreateAccount_GeneratesValid18DigitBrojRacuna(t *testing.T) {
-	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, &mockCurrencyRepo{})
+	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, &mockCurrencyRepo{}, nil)
 
 	acc, err := svc.CreateAccount(service.CreateAccountInput{
 		ClientID:   ptr(1),
@@ -154,7 +158,7 @@ func TestCreateAccount_GeneratesValid18DigitBrojRacuna(t *testing.T) {
 }
 
 func TestCreateAccount_SetsDefaultLimits(t *testing.T) {
-	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, &mockCurrencyRepo{})
+	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, &mockCurrencyRepo{}, nil)
 
 	acc, err := svc.CreateAccount(service.CreateAccountInput{
 		ClientID:   ptr(1),
@@ -176,12 +180,33 @@ func TestCreateAccount_SetsDefaultLimits(t *testing.T) {
 	}
 }
 
+func TestCreateAccount_SetsDatumIsteka5YearsFromNow(t *testing.T) {
+	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, &mockCurrencyRepo{}, nil)
+
+	acc, err := svc.CreateAccount(service.CreateAccountInput{
+		ClientID:   ptr(1),
+		CurrencyID: 1,
+		Tip:        "tekuci",
+		Vrsta:      "licni",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if acc.DatumIsteka == nil {
+		t.Fatal("expected DatumIsteka to be set, got nil")
+	}
+	yearsFromNow := acc.DatumIsteka.Year() - time.Now().Year()
+	if yearsFromNow < 4 || yearsFromNow > 6 {
+		t.Errorf("expected DatumIsteka ~5 years from now, got %v (years diff=%d)", acc.DatumIsteka, yearsFromNow)
+	}
+}
+
 // --- GetAccount tests ---
 
 func TestGetAccount_ReturnsAccount(t *testing.T) {
 	expected := &models.Account{ID: 7, BrojRacuna: "000123456789012345", Naziv: "Moj račun"}
 	repo := &mockAccountRepo{findByIDResult: expected}
-	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{})
+	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{}, nil)
 
 	acc, err := svc.GetAccount(7)
 	if err != nil {
@@ -194,7 +219,7 @@ func TestGetAccount_ReturnsAccount(t *testing.T) {
 
 func TestGetAccount_InvalidID_ReturnsError(t *testing.T) {
 	repo := &mockAccountRepo{findByIDErr: errors.New("record not found")}
-	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{})
+	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{}, nil)
 
 	_, err := svc.GetAccount(999)
 	if err == nil {
@@ -210,7 +235,7 @@ func TestListAccountsByClient_ReturnsClientAccounts(t *testing.T) {
 		{ID: 2, ClientID: ptr(5)},
 	}
 	repo := &mockAccountRepo{listByClientResult: accounts}
-	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{})
+	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{}, nil)
 
 	result, err := svc.ListAccountsByClient(5)
 	if err != nil {
@@ -224,8 +249,8 @@ func TestListAccountsByClient_ReturnsClientAccounts(t *testing.T) {
 // --- UpdateAccountName tests ---
 
 func TestUpdateAccountName_ChangesName(t *testing.T) {
-	repo := &mockAccountRepo{}
-	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{})
+	repo := &mockAccountRepo{findByIDResult: &models.Account{ID: 3}}
+	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{}, nil)
 
 	err := svc.UpdateAccountName(3, "Novi naziv")
 	if err != nil {
@@ -242,10 +267,11 @@ func TestUpdateAccountName_ChangesName(t *testing.T) {
 // --- UpdateAccountLimits tests ---
 
 func TestUpdateAccountLimits_ValidPositiveAmounts(t *testing.T) {
-	repo := &mockAccountRepo{}
-	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{})
+	ownerID := uint(7)
+	repo := &mockAccountRepo{findByIDResult: &models.Account{ID: 4, ClientID: &ownerID}}
+	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{}, nil)
 
-	err := svc.UpdateAccountLimits(4, 50000, 500000)
+	err := svc.UpdateAccountLimits(4, ownerID, 50000, 500000)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -261,18 +287,18 @@ func TestUpdateAccountLimits_ValidPositiveAmounts(t *testing.T) {
 }
 
 func TestUpdateAccountLimits_RejectsNegativeDnevniLimit(t *testing.T) {
-	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, &mockCurrencyRepo{})
+	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, &mockCurrencyRepo{}, nil)
 
-	err := svc.UpdateAccountLimits(4, -1, 500000)
+	err := svc.UpdateAccountLimits(4, 0, -1, 500000)
 	if err == nil {
 		t.Fatal("expected error for negative dnevni limit, got nil")
 	}
 }
 
 func TestUpdateAccountLimits_RejectsNegativeMesecniLimit(t *testing.T) {
-	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, &mockCurrencyRepo{})
+	svc := service.NewAccountServiceWithRepos(&mockAccountRepo{}, &mockCurrencyRepo{}, nil)
 
-	err := svc.UpdateAccountLimits(4, 50000, -1)
+	err := svc.UpdateAccountLimits(4, 0, 50000, -1)
 	if err == nil {
 		t.Fatal("expected error for negative mesecni limit, got nil")
 	}
@@ -283,7 +309,7 @@ func TestUpdateAccountLimits_RejectsNegativeMesecniLimit(t *testing.T) {
 func TestListAllAccounts_ReturnsPaginatedResults(t *testing.T) {
 	accounts := []models.Account{{ID: 1}, {ID: 2}, {ID: 3}}
 	repo := &mockAccountRepo{listAllResult: accounts, listAllTotal: 3}
-	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{})
+	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{}, nil)
 
 	result, total, err := svc.ListAllAccounts(models.AccountFilter{Page: 1, PageSize: 10})
 	if err != nil {
@@ -299,7 +325,7 @@ func TestListAllAccounts_ReturnsPaginatedResults(t *testing.T) {
 
 func TestListAllAccounts_FilterByTip(t *testing.T) {
 	repo := &mockAccountRepo{listAllResult: []models.Account{{ID: 1, Tip: "tekuci"}}, listAllTotal: 1}
-	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{})
+	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{}, nil)
 
 	_, _, err := svc.ListAllAccounts(models.AccountFilter{Tip: "tekuci"})
 	if err != nil {
@@ -312,7 +338,7 @@ func TestListAllAccounts_FilterByTip(t *testing.T) {
 
 func TestListAllAccounts_FilterByStatus(t *testing.T) {
 	repo := &mockAccountRepo{listAllResult: []models.Account{{ID: 1, Status: "aktivan"}}, listAllTotal: 1}
-	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{})
+	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{}, nil)
 
 	_, _, err := svc.ListAllAccounts(models.AccountFilter{Status: "aktivan"})
 	if err != nil {
@@ -326,7 +352,7 @@ func TestListAllAccounts_FilterByStatus(t *testing.T) {
 func TestListAllAccounts_FilterByCurrency(t *testing.T) {
 	currID := uint(2)
 	repo := &mockAccountRepo{listAllResult: []models.Account{{ID: 1, CurrencyID: 2}}, listAllTotal: 1}
-	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{})
+	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{}, nil)
 
 	_, _, err := svc.ListAllAccounts(models.AccountFilter{CurrencyID: &currID})
 	if err != nil {
@@ -339,7 +365,7 @@ func TestListAllAccounts_FilterByCurrency(t *testing.T) {
 
 func TestListAllAccounts_PaginationPassedThrough(t *testing.T) {
 	repo := &mockAccountRepo{listAllResult: []models.Account{}, listAllTotal: 0}
-	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{})
+	svc := service.NewAccountServiceWithRepos(repo, &mockCurrencyRepo{}, nil)
 
 	_, _, err := svc.ListAllAccounts(models.AccountFilter{Page: 3, PageSize: 20})
 	if err != nil {

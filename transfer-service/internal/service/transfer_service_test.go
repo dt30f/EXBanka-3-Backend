@@ -69,15 +69,37 @@ func (m *mockExchangeRateService) GetRate(from, to string) (float64, error) {
 func rsdAccount(id uint, balance float64) *models.Account {
 	return &models.Account{
 		ID: id, RaspolozivoStanje: balance, Stanje: balance,
-		DnevniLimit: 100000, CurrencyID: 1,
+		DnevniLimit: 100000, MesecniLimit: 1000000, CurrencyID: 1,
 		Currency: models.Currency{ID: 1, Kod: "RSD"},
 	}
+}
+
+// captureAccountRepo records all UpdateFields calls indexed by account ID.
+type captureAccountRepo struct {
+	accounts map[uint]*models.Account
+	updates  map[uint]map[string]interface{}
+}
+
+func newCaptureRepo(accounts map[uint]*models.Account) *captureAccountRepo {
+	return &captureAccountRepo{accounts: accounts, updates: make(map[uint]map[string]interface{})}
+}
+
+func (r *captureAccountRepo) FindByID(id uint) (*models.Account, error) {
+	if a, ok := r.accounts[id]; ok {
+		return a, nil
+	}
+	return nil, errors.New("account not found")
+}
+
+func (r *captureAccountRepo) UpdateFields(id uint, fields map[string]interface{}) error {
+	r.updates[id] = fields
+	return nil
 }
 
 func eurAccount(id uint, balance float64) *models.Account {
 	return &models.Account{
 		ID: id, RaspolozivoStanje: balance, Stanje: balance,
-		DnevniLimit: 10000, CurrencyID: 2,
+		DnevniLimit: 10000, MesecniLimit: 100000, CurrencyID: 2,
 		Currency: models.Currency{ID: 2, Kod: "EUR"},
 	}
 }
@@ -265,5 +287,111 @@ func TestListTransfersByClient_PaginationPassedThrough(t *testing.T) {
 	}
 	if transferRepo.capturedClientFilter.PageSize != 20 {
 		t.Errorf("expected PageSize=20, got %d", transferRepo.capturedClientFilter.PageSize)
+	}
+}
+
+// --- DnevnaPotrosnja / MesecnaPotrosnja tests ---
+
+func TestCreateTransfer_DailySpendingExceedsLimit_ReturnsError(t *testing.T) {
+	accountRepo := newCaptureRepo(map[uint]*models.Account{
+		1: {
+			ID: 1, RaspolozivoStanje: 50000, Stanje: 50000,
+			DnevniLimit: 100000, MesecniLimit: 1000000,
+			DnevnaPotrosnja: 90000, // already spent 90k today
+			CurrencyID: 1, Currency: models.Currency{Kod: "RSD"},
+		},
+		2: rsdAccount(2, 0),
+	})
+	svc := service.NewTransferServiceWithRepos(accountRepo, &mockTransferRepo{}, &mockExchangeRateService{})
+
+	_, err := svc.CreateTransfer(service.CreateTransferInput{
+		RacunPosiljaocaID: 1, RacunPrimaocaID: 2, Iznos: 20000, // 90000+20000=110000 > 100000
+	})
+	if err == nil {
+		t.Fatal("expected daily spending limit error, got nil")
+	}
+}
+
+func TestCreateTransfer_MonthlySpendingExceedsLimit_ReturnsError(t *testing.T) {
+	accountRepo := newCaptureRepo(map[uint]*models.Account{
+		1: {
+			ID: 1, RaspolozivoStanje: 100000, Stanje: 100000,
+			DnevniLimit: 500000, MesecniLimit: 1000000,
+			MesecnaPotrosnja: 970000, // already spent 970k this month
+			CurrencyID: 1, Currency: models.Currency{Kod: "RSD"},
+		},
+		2: rsdAccount(2, 0),
+	})
+	svc := service.NewTransferServiceWithRepos(accountRepo, &mockTransferRepo{}, &mockExchangeRateService{})
+
+	_, err := svc.CreateTransfer(service.CreateTransferInput{
+		RacunPosiljaocaID: 1, RacunPrimaocaID: 2, Iznos: 50000, // 970000+50000=1020000 > 1000000
+	})
+	if err == nil {
+		t.Fatal("expected monthly spending limit error, got nil")
+	}
+}
+
+func TestCreateTransfer_Success_UpdatesDnevnaPotrosnja(t *testing.T) {
+	accountRepo := newCaptureRepo(map[uint]*models.Account{
+		1: {
+			ID: 1, RaspolozivoStanje: 10000, Stanje: 10000,
+			DnevniLimit: 100000, MesecniLimit: 1000000,
+			DnevnaPotrosnja: 1000, MesecnaPotrosnja: 5000,
+			CurrencyID: 1, Currency: models.Currency{Kod: "RSD"},
+		},
+		2: rsdAccount(2, 0),
+	})
+	svc := service.NewTransferServiceWithRepos(accountRepo, &mockTransferRepo{}, &mockExchangeRateService{})
+
+	_, err := svc.CreateTransfer(service.CreateTransferInput{
+		RacunPosiljaocaID: 1, RacunPrimaocaID: 2, Iznos: 500,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	senderUpdate, ok := accountRepo.updates[1]
+	if !ok {
+		t.Fatal("expected sender account to be updated")
+	}
+	newDnevna, ok := senderUpdate["dnevna_potrosnja"].(float64)
+	if !ok {
+		t.Fatal("dnevna_potrosnja not updated in sender account")
+	}
+	if newDnevna != 1500 {
+		t.Errorf("expected dnevna_potrosnja=1500, got %f", newDnevna)
+	}
+}
+
+func TestCreateTransfer_Success_UpdatesMesecnaPotrosnja(t *testing.T) {
+	accountRepo := newCaptureRepo(map[uint]*models.Account{
+		1: {
+			ID: 1, RaspolozivoStanje: 10000, Stanje: 10000,
+			DnevniLimit: 100000, MesecniLimit: 1000000,
+			DnevnaPotrosnja: 1000, MesecnaPotrosnja: 5000,
+			CurrencyID: 1, Currency: models.Currency{Kod: "RSD"},
+		},
+		2: rsdAccount(2, 0),
+	})
+	svc := service.NewTransferServiceWithRepos(accountRepo, &mockTransferRepo{}, &mockExchangeRateService{})
+
+	_, err := svc.CreateTransfer(service.CreateTransferInput{
+		RacunPosiljaocaID: 1, RacunPrimaocaID: 2, Iznos: 500,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	senderUpdate, ok := accountRepo.updates[1]
+	if !ok {
+		t.Fatal("expected sender account to be updated")
+	}
+	newMesecna, ok := senderUpdate["mesecna_potrosnja"].(float64)
+	if !ok {
+		t.Fatal("mesecna_potrosnja not updated in sender account")
+	}
+	if newMesecna != 5500 {
+		t.Errorf("expected mesecna_potrosnja=5500, got %f", newMesecna)
 	}
 }
