@@ -11,10 +11,11 @@ type Card struct {
 	AccountID      uint      `gorm:"not null" json:"account_id"`
 	ClientID       uint      `gorm:"not null" json:"client_id"`
 	Status         string    `gorm:"default:'aktivna';not null" json:"status"` // aktivna, blokirana, deaktivirana
-	DatumKreiranja time.Time `json:"datum_kreiranja"`
-	DatumIsteka    time.Time `json:"datum_isteka"` // +5 years from creation
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	OvlascenoLiceID *uint     `json:"ovlasceno_lice_id,omitempty"` // optional, for poslovni cards
+	DatumKreiranja  time.Time `json:"datum_kreiranja"`
+	DatumIsteka     time.Time `json:"datum_isteka"` // +5 years from creation
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // ValidCardTypes returns the supported card network types.
