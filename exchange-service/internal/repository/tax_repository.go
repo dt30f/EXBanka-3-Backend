@@ -41,6 +41,35 @@ func (r *TaxRepository) SumUnpaidTaxForUser(userID uint, userType, period string
 	return total, err
 }
 
+// TaxableUser identifies a user who has unpaid tax records.
+type TaxableUser struct {
+	UserID   uint
+	UserType string
+}
+
+// ListDistinctUsersWithUnpaidTax returns all unique users who have unpaid tax
+// records for the given period.
+func (r *TaxRepository) ListDistinctUsersWithUnpaidTax(period string) ([]TaxableUser, error) {
+	rows, err := r.db.Model(&models.TaxRecord{}).
+		Select("DISTINCT user_id, user_type").
+		Where("period = ? AND status = 'unpaid'", period).
+		Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []TaxableUser
+	for rows.Next() {
+		var u TaxableUser
+		if err := rows.Scan(&u.UserID, &u.UserType); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, nil
+}
+
 // MarkTaxRecordsPaid marks all unpaid records for a user+period as paid.
 func (r *TaxRepository) MarkTaxRecordsPaid(userID uint, userType, period string) error {
 	return r.db.Model(&models.TaxRecord{}).

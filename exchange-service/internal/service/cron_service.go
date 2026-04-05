@@ -26,16 +26,33 @@ func StartCronJobs(db *gorm.DB, portfolioSvc *PortfolioService) *cron.Cron {
 	}
 
 	// Order execution engine: attempt to fill active orders every minute.
-	executor := NewOrderExecutor(
-		repository.NewOrderRepository(db),
-		repository.NewMarketRepository(db),
-		portfolioSvc,
-	)
+	orderRepo := repository.NewOrderRepository(db)
+	marketRepo := repository.NewMarketRepository(db)
+	executor := NewOrderExecutor(orderRepo, marketRepo, portfolioSvc)
 	_, err = c.AddFunc("@every 1m", func() {
 		executor.Run()
 	})
 	if err != nil {
 		slog.Error("Failed to add order executor cron job", "error", err)
+	}
+
+	// Monthly tax collection: runs at 02:00 on the 1st of each month.
+	taxRepo := repository.NewTaxRepository(db)
+	taxSvc := NewTaxService(taxRepo, marketRepo)
+	taxCollector := NewTaxCollector(taxSvc, orderRepo, taxRepo)
+	_, err = c.AddFunc("0 2 1 * *", func() {
+		period := PreviousMonthPeriod()
+		slog.Info("Starting monthly tax collection", "period", period)
+		res := taxCollector.CollectForPeriod(period)
+		slog.Info("Monthly tax collection finished",
+			"period", res.Period,
+			"users_processed", res.UsersProcessed,
+			"total_collected_rsd", res.TotalCollected,
+			"debts", len(res.Debts),
+		)
+	})
+	if err != nil {
+		slog.Error("Failed to add tax collection cron job", "error", err)
 	}
 
 	c.Start()
