@@ -1,0 +1,152 @@
+package repository
+
+import (
+	"errors"
+	"time"
+
+	"github.com/RAF-SI-2025/EXBanka-3-Backend/exchange-service/internal/models"
+	"gorm.io/gorm"
+)
+
+type OrderRepository struct {
+	db *gorm.DB
+}
+
+func NewOrderRepository(db *gorm.DB) *OrderRepository {
+	return &OrderRepository{db: db}
+}
+
+// CreateOrder persists a new order record.
+func (r *OrderRepository) CreateOrder(order *models.OrderRecord) error {
+	return r.db.Create(order).Error
+}
+
+// GetOrderByID returns an order with its transactions preloaded.
+func (r *OrderRepository) GetOrderByID(id uint) (*models.OrderRecord, error) {
+	var record models.OrderRecord
+	if err := r.db.Preload("Asset").Preload("Asset.Exchange").Preload("Transactions").
+		First(&record, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &record, nil
+}
+
+// ListOrdersForUser returns all orders for a given user, optionally filtered by status.
+func (r *OrderRepository) ListOrdersForUser(userID uint, userType, statusFilter string) ([]models.OrderRecord, error) {
+	q := r.db.Preload("Asset").Preload("Asset.Exchange").
+		Where("user_id = ? AND user_type = ?", userID, userType)
+	if statusFilter != "" {
+		q = q.Where("status = ?", statusFilter)
+	}
+	var records []models.OrderRecord
+	if err := q.Order("created_at DESC").Find(&records).Error; err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+// ListPendingActiveOrders returns all orders that are approved/pending and not done,
+// used by the execution engine cron.
+func (r *OrderRepository) ListPendingActiveOrders() ([]models.OrderRecord, error) {
+	var records []models.OrderRecord
+	if err := r.db.Preload("Asset").Preload("Asset.Exchange").
+		Where("is_done = false AND status IN ?", []string{"approved", "pending"}).
+		Find(&records).Error; err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+// UpdateOrderStatus sets the status and optionally the approved_by field.
+func (r *OrderRepository) UpdateOrderStatus(id uint, status string, approvedBy *uint) error {
+	updates := map[string]interface{}{
+		"status":            status,
+		"last_modification": time.Now().UTC(),
+	}
+	if approvedBy != nil {
+		updates["approved_by"] = *approvedBy
+	}
+	return r.db.Model(&models.OrderRecord{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// DecrementRemainingPortions reduces remaining_portions and marks done if 0.
+func (r *OrderRepository) DecrementRemainingPortions(id uint, filled int64) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var order models.OrderRecord
+		if err := tx.First(&order, id).Error; err != nil {
+			return err
+		}
+		order.RemainingPortions -= filled
+		order.LastModification = time.Now().UTC()
+		if order.RemainingPortions <= 0 {
+			order.RemainingPortions = 0
+			order.IsDone = true
+			order.Status = "done"
+		}
+		return tx.Save(&order).Error
+	})
+}
+
+// CreateOrderTransaction persists a fill event.
+func (r *OrderRepository) CreateOrderTransaction(tx *models.OrderTransactionRecord) error {
+	return r.db.Create(tx).Error
+}
+
+// ListTransactionsForOrder returns all transactions for an order.
+func (r *OrderRepository) ListTransactionsForOrder(orderID uint) ([]models.OrderTransactionRecord, error) {
+	var records []models.OrderTransactionRecord
+	if err := r.db.Where("order_id = ?", orderID).Order("executed_at ASC").Find(&records).Error; err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+// --- Actuary helpers (reads from shared DB, employee-service tables) ---
+
+// ActuaryProfile is a lightweight read of the actuary_profiles table.
+type ActuaryProfile struct {
+	EmployeeID   uint
+	Limit        *float64
+	UsedLimit    float64
+	NeedApproval bool
+}
+
+// GetActuaryProfile fetches the actuary profile for an employee directly from the shared DB.
+// Returns nil if the employee has no actuary profile (i.e. is not an agent/supervisor).
+func (r *OrderRepository) GetActuaryProfile(employeeID uint) (*ActuaryProfile, error) {
+	var profile ActuaryProfile
+	err := r.db.Table("actuary_profiles").
+		Select("employee_id, trading_limit as limit, used_limit, need_approval").
+		Where("employee_id = ?", employeeID).
+		First(&profile).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &profile, nil
+}
+
+// IncrementUsedLimit atomically adds delta to used_limit for an employee.
+func (r *OrderRepository) IncrementUsedLimit(employeeID uint, delta float64) error {
+	return r.db.Table("actuary_profiles").
+		Where("employee_id = ?", employeeID).
+		UpdateColumn("used_limit", gorm.Expr("used_limit + ?", delta)).Error
+}
+
+// --- Account helpers (reads from shared DB, account-service tables) ---
+
+// GetAccountBalance returns the raspolozivo_stanje (available balance) and currency_kod for an account.
+func (r *OrderRepository) GetAccountBalance(accountID uint) (balance float64, currencyKod string, err error) {
+	row := r.db.Table("accounts").
+		Select("accounts.raspolozivo_stanje, currencies.kod").
+		Joins("LEFT JOIN currencies ON currencies.id = accounts.currency_id").
+		Where("accounts.id = ?", accountID).
+		Row()
+	err = row.Scan(&balance, &currencyKod)
+	return
+}
