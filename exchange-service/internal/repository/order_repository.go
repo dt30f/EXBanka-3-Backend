@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/RAF-SI-2025/EXBanka-3-Backend/exchange-service/internal/models"
@@ -178,6 +179,84 @@ func (r *OrderRepository) GetSettlementDate(assetID uint) (*time.Time, error) {
 }
 
 // --- Account helpers (reads from shared DB, account-service tables) ---
+
+// UserRSDAccount holds the ID and available balance of a user's RSD account.
+type UserRSDAccount struct {
+	ID                uint
+	RaspolozivoStanje float64
+}
+
+// GetUserRSDAccounts returns all active RSD-denominated accounts for a user.
+// For clients, matches on client_id; for employees, on zaposleni_id.
+func (r *OrderRepository) GetUserRSDAccounts(userID uint, userType string) ([]UserRSDAccount, error) {
+	q := r.db.Table("accounts").
+		Select("accounts.id, accounts.raspolozivo_stanje").
+		Joins("JOIN currencies ON currencies.id = accounts.currency_id").
+		Where("currencies.kod = 'RSD' AND accounts.status = 'aktivan'")
+
+	if userType == "client" {
+		q = q.Where("accounts.client_id = ?", userID)
+	} else {
+		q = q.Where("accounts.zaposleni_id = ?", userID)
+	}
+
+	rows, err := q.Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var accounts []UserRSDAccount
+	for rows.Next() {
+		var a UserRSDAccount
+		if err := rows.Scan(&a.ID, &a.RaspolozivoStanje); err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, a)
+	}
+	return accounts, nil
+}
+
+// DebitAccount atomically debits amount from an account if sufficient balance exists.
+// Returns an error if the balance is insufficient.
+func (r *OrderRepository) DebitAccount(accountID uint, amount float64) error {
+	result := r.db.Table("accounts").
+		Where("id = ? AND raspolozivo_stanje >= ?", accountID, amount).
+		Updates(map[string]interface{}{
+			"raspolozivo_stanje": gorm.Expr("raspolozivo_stanje - ?", amount),
+			"stanje":             gorm.Expr("stanje - ?", amount),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("insufficient balance in account %d", accountID)
+	}
+	return nil
+}
+
+// CreditAccount adds amount to an account's balance.
+func (r *OrderRepository) CreditAccount(accountID uint, amount float64) error {
+	return r.db.Table("accounts").
+		Where("id = ?", accountID).
+		Updates(map[string]interface{}{
+			"raspolozivo_stanje": gorm.Expr("raspolozivo_stanje + ?", amount),
+			"stanje":             gorm.Expr("stanje + ?", amount),
+		}).Error
+}
+
+// GetStateTreasuryAccountID returns the ID of the "Republika Srbija" RSD account.
+// Returns 0 if no such account exists.
+func (r *OrderRepository) GetStateTreasuryAccountID() (uint, error) {
+	var id uint
+	err := r.db.Table("accounts").
+		Select("accounts.id").
+		Joins("JOIN currencies ON currencies.id = accounts.currency_id").
+		Where("LOWER(accounts.naziv) LIKE '%republika srbija%' AND currencies.kod = 'RSD' AND accounts.status = 'aktivan'").
+		Limit(1).
+		Scan(&id).Error
+	return id, err
+}
 
 // GetAccountBalance returns the raspolozivo_stanje (available balance) and currency_kod for an account.
 func (r *OrderRepository) GetAccountBalance(accountID uint) (balance float64, currencyKod string, err error) {
