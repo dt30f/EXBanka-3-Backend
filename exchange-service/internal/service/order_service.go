@@ -108,6 +108,15 @@ func (s *OrderService) CreateOrder(input CreateOrderInput) (*CreateOrderResult, 
 		}
 	}
 
+	// For buy orders, debit the full order value + commission from the account upfront.
+	// On cancel, RefundToAccount returns the unfilled portion (without commission).
+	if input.Direction == "buy" {
+		totalDebit := round2(totalPrice + commission)
+		if err := s.orderRepo.DebitAccount(input.AccountID, totalDebit); err != nil {
+			return nil, fmt.Errorf("insufficient funds: %w", err)
+		}
+	}
+
 	now := time.Now().UTC()
 	order := &models.OrderRecord{
 		UserID:            input.UserID,
@@ -212,6 +221,7 @@ func (s *OrderService) ApproveOrder(orderID, supervisorID uint) error {
 }
 
 // DeclineOrder declines a pending order on behalf of a supervisor.
+// For buy orders the full debit (order value + commission) is refunded.
 func (s *OrderService) DeclineOrder(orderID, supervisorID uint) error {
 	order, err := s.orderRepo.GetOrderByID(orderID)
 	if err != nil {
@@ -223,6 +233,16 @@ func (s *OrderService) DeclineOrder(orderID, supervisorID uint) error {
 	if order.Status != "pending" {
 		return fmt.Errorf("order is not pending (status: %s)", order.Status)
 	}
+
+	// Refund the full debit that was taken on creation.
+	if order.Direction == "buy" {
+		totalPrice := round2(float64(order.Quantity) * float64(order.ContractSize) * order.PricePerUnit)
+		refund := round2(totalPrice + order.Commission)
+		if err := s.orderRepo.RefundToAccount(order.AccountID, refund); err != nil {
+			return fmt.Errorf("failed to refund account on decline: %w", err)
+		}
+	}
+
 	return s.orderRepo.UpdateOrderStatus(orderID, "declined", &supervisorID)
 }
 
@@ -298,6 +318,11 @@ func (s *OrderService) GetOrder(id uint) (*models.OrderRecord, error) {
 // ListOrdersForUser returns orders for a user with optional status filter.
 func (s *OrderService) ListOrdersForUser(userID uint, userType, statusFilter string) ([]models.OrderRecord, error) {
 	return s.orderRepo.ListOrdersForUser(userID, userType, statusFilter)
+}
+
+// ListAllOrders returns all orders across all users, used by supervisors.
+func (s *OrderService) ListAllOrders(statusFilter string) ([]models.OrderRecord, error) {
+	return s.orderRepo.ListAllOrders(statusFilter)
 }
 
 // ListTransactionsForOrder returns all fill events for an order.

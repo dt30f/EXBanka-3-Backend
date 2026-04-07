@@ -78,6 +78,14 @@ func (e *OrderExecutor) Run() {
 			// Non-fatal: order fill is committed; portfolio can be reconciled later.
 		}
 
+		// Credit account for sell fills.
+		if order.Direction == "sell" {
+			fillAmount := round2(float64(fillQty) * float64(order.ContractSize) * price)
+			if err := e.orderRepo.CreditAccount(order.AccountID, fillAmount); err != nil {
+				slog.Error("order executor: failed to credit account on sell", "orderID", order.ID, "error", err)
+			}
+		}
+
 		slog.Info("order executor: filled",
 			"orderID", order.ID,
 			"type", order.OrderType,

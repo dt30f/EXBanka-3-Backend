@@ -49,6 +49,20 @@ func (r *OrderRepository) ListOrdersForUser(userID uint, userType, statusFilter 
 	return records, nil
 }
 
+// ListAllOrders returns all orders across all users, optionally filtered by status.
+// Used by supervisors to review orders from all agents.
+func (r *OrderRepository) ListAllOrders(statusFilter string) ([]models.OrderRecord, error) {
+	q := r.db.Preload("Asset").Preload("Asset.Exchange")
+	if statusFilter != "" {
+		q = q.Where("status = ?", statusFilter)
+	}
+	var records []models.OrderRecord
+	if err := q.Order("created_at DESC").Find(&records).Error; err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
 // ListPendingActiveOrders returns all orders that are approved/pending and not done,
 // used by the execution engine cron.
 func (r *OrderRepository) ListPendingActiveOrders() ([]models.OrderRecord, error) {

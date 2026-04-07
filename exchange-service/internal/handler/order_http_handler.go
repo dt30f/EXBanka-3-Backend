@@ -136,20 +136,28 @@ func (h *OrderHTTPHandler) listOrders(w http.ResponseWriter, r *http.Request) {
 	statusFilter := r.URL.Query().Get("status")
 	userID, userType := callerIdentity(claims)
 
-	// Supervisors can optionally filter by a different user via ?userId=N&userType=employee|client
+	var orders []models.OrderRecord
+	var err error
+
 	if util.HasPermission(claims, models.PermEmployeeSupervisor) {
+		// Supervisors see ALL orders by default.
+		// Optionally narrow to a specific user via ?userId=N&userType=employee|client
 		if uidStr := r.URL.Query().Get("userId"); uidStr != "" {
-			uid, err := strconv.ParseUint(uidStr, 10, 64)
-			if err == nil {
+			uid, parseErr := strconv.ParseUint(uidStr, 10, 64)
+			if parseErr == nil {
 				userID = uint(uid)
 				if ut := r.URL.Query().Get("userType"); ut != "" {
 					userType = ut
 				}
 			}
+			orders, err = h.svc.ListOrdersForUser(userID, userType, statusFilter)
+		} else {
+			orders, err = h.svc.ListAllOrders(statusFilter)
 		}
+	} else {
+		orders, err = h.svc.ListOrdersForUser(userID, userType, statusFilter)
 	}
 
-	orders, err := h.svc.ListOrdersForUser(userID, userType, statusFilter)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "failed to load orders"})
 		return
